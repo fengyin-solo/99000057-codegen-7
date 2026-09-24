@@ -1,12 +1,29 @@
 <template>
   <el-dialog
     :model-value="visible"
-    title="Card Details"
     width="540px"
     :close-on-click-modal="false"
     @update:model-value="$emit('update:visible', $event)"
     @open="initForm"
   >
+    <template #header="{ titleId, titleClass }">
+      <div class="dialog-header">
+        <span :id="titleId" :class="titleClass">Card Details</span>
+        <el-tag v-if="isDirty" type="warning" size="small" effect="light" round>
+          Unsaved changes
+        </el-tag>
+      </div>
+    </template>
+
+    <el-alert
+      v-if="restoredDraft"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="Your previous changes could not be saved. They have been restored so you can try again."
+      style="margin-bottom: 12px;"
+    />
+
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item label="Title" prop="title">
         <el-input v-model="form.title" placeholder="Card title" maxlength="100" show-word-limit />
@@ -52,13 +69,13 @@
 
     <template #footer>
       <el-button @click="$emit('update:visible', false)">Cancel</el-button>
-      <el-button type="primary" :loading="saving" @click="handleSave">Save Changes</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!isDirty || saving" @click="handleSave">Save Changes</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useBoardStore } from '../stores/board.js'
 
@@ -74,6 +91,11 @@ const boardStore = useBoardStore()
 const formRef = ref(null)
 const saving = ref(false)
 const moveTarget = ref(null)
+const restoredDraft = ref(false)
+
+// cardId -> { form, moveTarget }. Input from failed saves is kept here so
+// reopening the dialog restores it on top of the card's last valid state.
+const failedDrafts = new Map()
 
 const form = ref({
   title: '',
@@ -83,11 +105,27 @@ const form = ref({
 })
 
 const rules = {
-  title: [{ required: true, message: 'Title is required', trigger: 'blur' }]
+  title: [
+    { required: true, whitespace: true, message: 'Title is required', trigger: 'blur' }
+  ]
 }
 
+// True whenever the form differs from the card's last saved state
+const isDirty = computed(() => {
+  if (!props.card) return false
+  return (
+    form.value.title !== (props.card.title || '') ||
+    form.value.description !== (props.card.description || '') ||
+    form.value.priority !== (props.card.priority || 'medium') ||
+    (form.value.due_date || '') !== (props.card.due_date || '') ||
+    !!moveTarget.value
+  )
+})
+
 function initForm() {
+  restoredDraft.value = false
   if (props.card) {
+    // Start from the last saved (valid) state of the card
     form.value = {
       title: props.card.title || '',
       description: props.card.description || '',
@@ -95,18 +133,29 @@ function initForm() {
       due_date: props.card.due_date || ''
     }
     moveTarget.value = null
+
+    const draft = failedDrafts.get(props.card.id)
+    if (draft) {
+      // Re-apply the input that failed to save
+      form.value = { ...form.value, ...draft.form }
+      moveTarget.value = draft.moveTarget
+      failedDrafts.delete(props.card.id)
+      restoredDraft.value = true
+    }
   }
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 async function handleSave() {
-  if (!formRef.value) return
+  // Guard against duplicate submissions (e.g. double-click while validating)
+  if (saving.value || !formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
   saving.value = true
   try {
     const updated = await boardStore.updateCard(props.card.id, {
-      title: form.value.title,
+      title: form.value.title.trim(),
       description: form.value.description,
       priority: form.value.priority,
       due_date: form.value.due_date || null
@@ -120,11 +169,22 @@ async function handleSave() {
       ElMessage.success('Card moved')
     }
 
+    failedDrafts.delete(props.card.id)
     emit('update:visible', false)
   } catch (err) {
-    ElMessage.error('Failed to update card')
+    // Stash the unsaved input so reopening restores it on top of the last valid state
+    failedDrafts.set(props.card.id, { form: { ...form.value }, moveTarget: moveTarget.value })
+    ElMessage.error(err.response?.data?.error || 'Failed to update card')
   } finally {
     saving.value = false
   }
 }
 </script>
+
+<style scoped>
+.dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+</style>

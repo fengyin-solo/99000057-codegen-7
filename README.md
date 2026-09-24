@@ -99,6 +99,9 @@ The seed script creates a demo user with a sample board "My Project" containing 
 - Create and manage multiple boards
 - Add, rename, and delete columns
 - Create cards with title, description, priority (low/medium/high), and due date
+- Card templates for common scenarios (bug report, feature request, meeting notes, etc.) that pre-fill title, description, and priority
+- Unsaved-changes indicator while editing, with failed-save recovery (input is restored on next open)
+- Validation guards against empty titles and duplicate submissions
 - Drag and drop cards between columns
 - Drag and drop to reorder columns
 - Responsive design with Element Plus UI

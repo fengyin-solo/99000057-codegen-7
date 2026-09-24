@@ -103,6 +103,10 @@ router.post('/columns/:columnId/cards', (req, res) => {
 // PUT /api/cards/:id - Update card
 router.put('/cards/:id', (req, res) => {
   const { title, description, priority, due_date } = req.body;
+  if (title !== undefined && (!title || !String(title).trim())) {
+    return res.status(400).json({ error: 'Card title cannot be empty' });
+  }
+
   const db = getDb();
 
   try {
